@@ -1,0 +1,61 @@
+name: Single-cell RNA-seq PBMC workflow
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - "tests/**"
+      - "config/**"
+      - "requirements.txt"
+      - "README.md"
+      - ".github/workflows/scrnaseq-pbmcs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile Python files
+        run: python -m compileall -q scripts tests
+      - name: Validate analysis config
+        run: python -m json.tool config/analysis.json > /dev/null
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+  analysis:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install analysis dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Download PBMC 3k data
+        run: python scripts/download_data.py
+      - name: Validate input matrix
+        run: python scripts/validate_inputs.py --input data/raw/filtered_gene_bc_matrices/hg19
+      - name: Run Scanpy workflow
+        run: python scripts/run_analysis.py --config config/analysis.json --input data/raw/filtered_gene_bc_matrices/hg19 --output results
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrnaseq-pbmcs-results
+          path: results/
+          if-no-files-found: warn
+          retention-days: 14
